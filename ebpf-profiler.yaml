@@ -1,0 +1,82 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ebpf-profiler
+spec:
+  hostPID: true
+  containers:
+  - name: ebpf-profiler
+    image: {{PROFILER_IMAGE}}
+    imagePullPolicy: Always
+    securityContext:
+      privileged: true
+    command:
+    - nsenter
+    - --target
+    - "1"
+    - --uts
+    - --ipc
+    - --net
+    - --pid
+    - --cgroup
+    - --
+    - "/bin/bash"
+    - "-c"
+    - |-
+      export CONTAINER_RUNTIME_ENDPOINT=unix:///run/containerd/containerd.sock
+      TARGET_CONTAINER_ID=$(crictl ps | awk "/${TARGET_CONTAINER}/{print $1}")
+      TARGET_CONTAINER_PID=$(crictl inspect --output go-template --template '{{.info.pid}}' $TARGET_CONTAINER_ID)
+      echo "profiling pid $TARGET_CONTAINER_PID for seconds $SAMPLING_PERIOD"
+      SAMPLING_PERIOD=$(echo $SAMPLING_PERIOD | sed s/\"//g)
+      profile-bpfcc -dF 99 -f $SAMPLING_PERIOD -p $TARGET_CONTAINER_PID | tee ${TARGET_CONTAINER}.perf |/flamegraph.pl > /${TARGET_CONTAINER}.svg
+      echo "profiling complete"
+      sleep 30s #gives our script chance to copy out the flamegraph
+    env:
+    - name: SAMPLING_PERIOD
+      value: "{{SAMPLING_PERIOD}}"
+    - name: TARGET_POD
+      value: {{TARGET_POD}}
+    - name: TARGET_CONTAINER
+      value: {{TARGET_CONTAINER}}
+    volumeMounts:
+      - mountPath: /sys/kernel/debug
+        name: kernel-debug
+      - mountPath: /sys/fs/cgroup
+        name: fs-cgroup
+      - mountPath: /sys/fs/bpf
+        name: fs-bpf
+      - mountPath: /run/containerd
+        name: run-containerd
+      - mountPath: /usr/src
+        name: usr-src
+      - mountPath:  /usr/local/bin 
+        name: usr-local-bin
+      - mountPath: /lib/modules
+        name: lib-modules
+  nodeSelector:
+    kubernetes.io/hostname: {{AKS_NODE}}
+  imagePullSecrets:
+  - name: registrykey
+  volumes:
+    - name: kernel-debug
+      hostPath:
+        path: /sys/kernel/debug
+    - name: fs-cgroup
+      hostPath:
+        path: /sys/fs/cgroup
+    - name: fs-bpf
+      hostPath:
+        path: /sys/fs/bpf
+    - name: run-containerd
+      hostPath:
+        path: /run/containerd
+    - name: usr-src
+      hostPath:
+        path: /usr/src
+    - name: usr-local-bin
+      hostPath:
+        path: /usr/local/bin
+    - name: lib-modules
+      hostPath:
+        path: /lib/modules
+
