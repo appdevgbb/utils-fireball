@@ -1,5 +1,5 @@
 # utils-fireball
-Got a little taste of cinnamon. 
+Performance with a little taste of cinnamon. 
 
 `fireball` is a tool generates flamegraphs from as running pod in an AKS cluster.
 
